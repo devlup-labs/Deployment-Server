@@ -18,24 +18,24 @@ default_events:
   # - commit_comment
   # - create
   # - delete
-  - deployment
+  # - deployment
   # - deployment_status
   # - fork
   # - gollum
   # - issue_comment
-  # - issues
-  # - label
-  # - milestone
-  # - member
-  # - membership
-  # - org_block
-  # - organization
-  # - page_build
-  # - project
-  # - project_card
-  # - project_column
-  # - public
-  - pull_request
+  - issues
+# - label
+# - milestone
+# - member
+# - membership
+# - org_block
+# - organization
+# - page_build
+# - project
+# - project_card
+# - project_column
+# - public
+# - pull_request
 # - pull_request_review
 # - pull_request_review_comment
 # - push
@@ -66,13 +66,13 @@ default_permissions:
 
   # Deployments and deployment statuses.
   # https://developer.github.com/v3/apps/permissions/#permission-on-deployments
-  deployments: write
+  # deployments: read
 
   # Issues and related comments, assignees, labels, and milestones.
   # https://developer.github.com/v3/apps/permissions/#permission-on-issues
-  # issues: write
+  issues: write
 
-  # Search repositories, list collaborators, and access repository '.
+  # Search repositories, list collaborators, and access repository metadata.
   # https://developer.github.com/v3/apps/permissions/#metadata-permissions
   metadata: read
 
@@ -82,7 +82,7 @@ default_permissions:
 
   # Pull requests and related comments, assignees, labels, milestones, and merges.
   # https://developer.github.com/v3/apps/permissions/#permission-on-pull-requests
-  pull_requests: read
+  # pull_requests: read
 
   # Manage the post-receive hooks for a repository.
   # https://developer.github.com/v3/apps/permissions/#permission-on-repository-hooks
