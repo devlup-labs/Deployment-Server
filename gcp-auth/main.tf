@@ -7,16 +7,24 @@ terraform {
   }
 }
 
+variable "credentials" {}  
+variable "project_id" {}
+variable "region" {}
+
 provider "google" {
-  credentials = file("C:/Users/mohim/Downloads/chrome-orb-445506-j9-345a3c8d454b.json")
-  project     = "chrome-orb-445506-j9"
-  region      = "asia-south2"  
+  credentials = var.credentials 
+  project     = var.project_id
+  region      = var.region
 }
 
 data "google_project" "verify" {
-  project_id = "chrome-orb-445506-j9"
+  project_id = var.project_id
 }
 
 output "project_number" {
   value = "Project Number: ${data.google_project.verify.number}"
+}
+
+output "verification_status" {
+  value = "Verified! GCP Account has access to Project: ${data.google_project.verify.name} (ID: ${data.google_project.verify.project_id})"
 }
