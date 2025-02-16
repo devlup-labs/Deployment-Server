@@ -12,7 +12,7 @@ const s3 = new AWS.S3({
 });
 
 export default (app) => {
-  app.on("installation_repositories", (context) => {
+  app.on("installation_repositories",(context) => {
     const { action, repositories_added, sender } = context.payload;
 
     if (action === "added" && repositories_added.length > 0) {
@@ -25,7 +25,6 @@ export default (app) => {
   });
 
   const sendToApi = (userName, repoName, visibility) => {
-
     fetch(`${process.env.API_URL}/api/form/newnoauth/`, {
       method: "POST",
       headers: {
@@ -37,21 +36,9 @@ export default (app) => {
         visibility: visibility,
       }),
     })
-      .then((response) => {
-        if (response.ok) {
-          return response.json();
-        } else {
-          return response.text().then((text) => {
-            throw new Error(text);
-          });
-        }
-      })
-      .then((data) => {
-        app.log.info(`Response: ${JSON.stringify(data)}`);
-      })
-      .catch((error) => {
-        app.log.error(`API Error: Failed to send data for repo "${repoName}". Error: ${error.message}`);
-      });
+      .then((response) => response.ok ? response.json() : response.text().then(text => { throw new Error(text); }))
+      .then((data) => app.log.info(`Response: ${JSON.stringify(data)}`))
+      .catch((error) => app.log.error(`API Error: Failed to send data for repo "${repoName}". Error: ${error.message}`));
   };
 
   app.on("issues.opened", async (context) => {
@@ -78,12 +65,67 @@ export default (app) => {
         return;
       }
 
+      const ports = await fetchPorts(configId);
+      const publicKey = await fetchPublicKey(configId);
+
       const credentialsString = JSON.stringify(credentials).replace(/"/g, '\\"');
-      await verifyGcpCredentials(credentialsString, region, project_id, app);
+      
+      app.log.info("Starting GCP verification...");
+      const isVerified = await verifyGcpCredentials(credentialsString, region, project_id, app);
+      if (!isVerified) {
+        app.log.error("GCP verification failed. VM creation aborted.");
+        return;
+      }
+
+      app.log.info("Proceeding with VM creation...");
+      await createVmInstance(username, repoName, region, project_id, credentialsString, ports, publicKey, app);
     } catch (error) {
       app.log.error(`Error handling issue: ${error.message}`);
     }
   });
+
+  const fetchPorts = async (configId) => {
+    if (!configId) {
+      app.log.error("fetchPorts called without a valid configId");
+      return [];
+    }
+  
+    try {
+      const response = await fetch(`${process.env.API_URL}/api/port/?ID=${configId}`);
+      const data = await response.json();
+      
+      if (!Array.isArray(data)) {
+        throw new Error("Invalid port data format");
+      }
+  
+      return data.map(portEntry => portEntry.port_no);
+    } catch (error) {
+      app.log.error(`Error fetching ports: ${error.message}`);
+      return [];
+    }
+  };  
+  
+  const fetchPublicKey = async (configId) => {
+    if (!configId) {
+      app.log.error("fetchPublicKey called without a valid configId");
+      return "";
+    }
+  
+    try {
+      const response = await fetch(`${process.env.API_URL}/api/key/?ID=${configId}`);
+  
+      if (!response.ok) {
+        throw new Error(`Failed to fetch public key: ${await response.text()}`);
+      }
+  
+      const data = await response.json();
+      return data.public_key ? data.public_key.trim() : ""; 
+    } catch (error) {
+      app.log.error(`Error fetching public key: ${error.message}`);
+      return "";
+    }
+  };
+  
 
   const fetchConfigId = async (username, repo) => {
     try {
@@ -93,16 +135,9 @@ export default (app) => {
       const response = await fetch(idUrl);
       const data = await response.json();
       
-      if (!response.ok) {
-        throw new Error(data.message || "Failed to fetch Config ID");
-      }
+      if (!response.ok) throw new Error(data.message || "Failed to fetch Config ID");
 
-      let configId = null;
-      if (Array.isArray(data) && data.length > 0) {
-        configId = data[0].ID;
-      }
-      
-      return configId;
+      return Array.isArray(data) && data.length > 0 ? data[0].ID : null;
     } catch (error) {
       app.log.error(`Error fetching Config ID: ${error.message}`);
       return null;
@@ -117,12 +152,9 @@ export default (app) => {
       const response = await fetch(configUrl);
       const rawData = await response.text();
 
-      if (!response.ok) {
-        throw new Error(`Failed to fetch config details: ${rawData}`);
-      }
+      if (!response.ok) throw new Error(`Failed to fetch config details: ${rawData}`);
 
-      const configData = JSON.parse(rawData);
-      return configData;
+      return JSON.parse(rawData);
     } catch (error) {
       app.log.error(`Error fetching Config Details by ID: ${error.message}`);
       return null;
@@ -144,17 +176,38 @@ export default (app) => {
     }
   };
 
-  const verifyGcpCredentials = async (credentialsString, region, projectId, app) => {
-    const terraformDirectory = "../gcp-auth";
-    const terraformCommand = `terraform init && terraform apply -auto-approve -var="credentials=${credentialsString}" -var="region=${region}" -var="project_id=${projectId}"`;
+  const verifyGcpCredentials = (credentialsString, region, projectId, app) => {
+    return new Promise((resolve, reject) => {
+      const terraformDirectory = "../gcp-auth";
+      const terraformCommand = `terraform init && terraform apply -auto-approve -var="credentials=${credentialsString}" -var="region=${region}" -var="project_id=${projectId}"`;
 
-    exec(terraformCommand, { cwd: terraformDirectory }, (error, stdout, stderr) => {
-      if (error) {
-        app.log.error(`Error running Terraform: ${error.message}`);
-        console.error("Verification failed. Please check the GCP project configuration.");
-        return;
-      }
-      console.log("GCP project is verified successfully!");
+      exec(terraformCommand, { cwd: terraformDirectory }, (error, stdout, stderr) => {
+        if (error) {
+          app.log.error(`Error running Terraform: ${stderr || error.message}`);
+          reject(false);
+        } else {
+          app.log.info("GCP project is verified successfully!");
+          resolve(true);
+        }
+      });
+    });
+  };
+
+  const createVmInstance = async (username, repoName, region, projectId, credentialsString, ports, publicKey, app) => {
+    return new Promise((resolve, reject) => {
+      const terraformDirectory = "../gcp-vm";
+      const instanceName = `${username.toLowerCase()}-${repoName.toLowerCase()}`;
+      const terraformCommand = `terraform init && terraform apply -auto-approve -var="credentials=${credentialsString}" -var="region=${region}" -var="project_id=${projectId}" -var="instance_name=${instanceName}" -var="ports=${JSON.stringify(ports)}" -var="public_key=${publicKey}" -var="zone=asia-south2-b"`;
+
+      exec(terraformCommand, { cwd: terraformDirectory }, (error, stdout, stderr) => {
+        if (error) {
+          app.log.error(`VM creation failed: ${stderr || error.message}`);
+          reject(error);
+        } else {
+          app.log.info(`VM '${instanceName}' created successfully in ${region} with ports ${ports.join(", ")}.`);
+          resolve(stdout);
+        }
+      });
     });
   };
 };
