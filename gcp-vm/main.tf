@@ -13,13 +13,10 @@ variable "credentials" {
   sensitive   = true
 }
 
-variable "project_id" {}
+variable "project_id" {} 
 variable "region" {}
 variable "zone" {}
 variable "instance_name" {}
-variable "ports" {
-  type = list(string)
-}
 variable "public_key" {
   type    = string
   default = ""
@@ -49,19 +46,10 @@ resource "google_compute_instance" "vm_instance" {
     access_config {}
   }
 
-  metadata = var.public_key != "" ? { ssh-keys = "${var.public_key}" } : {}
+  metadata = {
+  ssh-keys = "ubuntu:${var.public_key}"
 }
-
-resource "google_compute_firewall" "allow_custom_ports" {
-  name    = "allow-custom-ports"
-  network = "default"
-
-  allow {
-    protocol = "tcp"
-    ports    = var.ports
-  }
-
-  source_ranges = ["0.0.0.0/0"]
+tags = ["web-server"]  
 }
 
 resource "google_compute_firewall" "allow_http" {
@@ -74,6 +62,7 @@ resource "google_compute_firewall" "allow_http" {
   }
 
   source_ranges = ["0.0.0.0/0"]
+  target_tags   = ["web-server"]
 }
 
 resource "google_compute_firewall" "allow_https" {
@@ -86,8 +75,13 @@ resource "google_compute_firewall" "allow_https" {
   }
 
   source_ranges = ["0.0.0.0/0"]
+  target_tags   = ["web-server"]
+}
+
+output "vm_ip" {
+  value = google_compute_instance.vm_instance.network_interface[0].access_config[0].nat_ip
 }
 
 output "vm_details" {
-  value = "VM '${var.instance_name}' created in ${var.zone} with e2-micro, Ubuntu 22.04 LTS, and balanced disk (10GB). Ports: ${join(", ", var.ports)}. HTTP and HTTPS allowed."
+  value = "VM '${var.instance_name}' created in ${var.zone} with e2-micro, Ubuntu 22.04 LTS, and balanced disk (10GB)"
 }
