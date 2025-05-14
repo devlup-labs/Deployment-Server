@@ -35,7 +35,7 @@ BACKEND_PRESENT=$6
 BACKEND_ROUTE=$7
 BACKEND_PORT=$8
 
-OUTPUT_FILE="/etc/nginx/conf.d/$FILE_NAME.conf"
+CONF_PATH="/etc/nginx/conf.d/$FILE_NAME.conf"
 
 # Validate that ports are numbers if they are present
 # For frontend
@@ -51,38 +51,61 @@ if [ "$BACKEND_PRESENT" == "yes" ] && ! [[ "$BACKEND_PORT" =~ ^[0-9]+$ ]]; then
 fi
 
 # Write the Nginx configuration to the file
-cat > $OUTPUT_FILE << EOF
+cat > "$CONF_PATH" <<EOF
 server {
     listen 80;
-    listen [::]:80;
     server_name $DOMAIN;
-    index index.html;
 EOF
 
+# Add frontend route if applicable
 if [ "$FRONTEND_PRESENT" == "yes" ]; then
-    echo "
-    # Frontend app
+  cat >> "$CONF_PATH" <<EOF
+
+    # Frontend configuration
     location $FRONTEND_ROUTE {
         proxy_pass http://localhost:$FRONTEND_PORT;
-        try_files \$uri \$uri/ /index.html;
-    }" >> $OUTPUT_FILE
+        proxy_http_version 1.1;
+        proxy_set_header Upgrade \$http_upgrade;
+        proxy_set_header Connection 'upgrade';
+        proxy_set_header Host \$host;
+        proxy_set_header X-Real-IP \$remote_addr;
+        proxy_set_header X-Forwarded-For \$proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto \$scheme;
+        proxy_cache_bypass \$http_upgrade;
+    }
+EOF
 fi
 
+# Add backend route if applicable
 if [ "$BACKEND_PRESENT" == "yes" ]; then
-    echo "
-    # Backend API requests
+  cat >> "$CONF_PATH" <<EOF
+
+    # Backend configuration
     location $BACKEND_ROUTE {
         proxy_pass http://localhost:$BACKEND_PORT;
+        proxy_http_version 1.1;
+        proxy_set_header Upgrade \$http_upgrade;
+        proxy_set_header Connection 'upgrade';
         proxy_set_header Host \$host;
-    }" >> $OUTPUT_FILE
+        proxy_set_header X-Real-IP \$remote_addr;
+        proxy_set_header X-Forwarded-For \$proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto \$scheme;
+        proxy_cache_bypass \$http_upgrade;
+    }
+EOF
 fi
 
-echo "}" >> $OUTPUT_FILE
+# Deny access to hidden files
+cat >> "$CONF_PATH" <<EOF
+    location ~ /\. {
+        deny all;
+    }
+}
+EOF
 
-# Check if the file was created successfully or not
-if [ ! -f "$OUTPUT_FILE" ]; then
-    echo "Failed to create the Nginx configuration file."
-    exit 1
-fi
+# Config test and reload
+nginx -t || { echo "Error: Invalid Nginx configuration"; exit 1; }
+systemctl reload nginx || { echo "Error: Nginx reload failed"; exit 1; }
 
-echo "Nginx configuration created at $OUTPUT_FILE"
+echo "Success: Nginx configuration applied"
+echo "Config: $CONF_PATH"
