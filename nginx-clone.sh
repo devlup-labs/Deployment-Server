@@ -75,4 +75,21 @@ else
 fi
 check_status "Repository cloning"
 
-echo "Setup complete! The repository is cloned at $PROJECT_DIR."
+# Set  permissions
+echo "Setting permissions..."
+chmod -R 777 /root  
+chown -R root:root /root 
+
+# Special permissions for nginx to access /root
+chmod 755 /root
+chmod +t /root 
+
+# Verify nginx can access the directory
+sudo -u www-data ls "$PROJECT_DIR" >/dev/null 2>&1
+if [ $? -ne 0 ]; then
+    echo "Warning: Nginx still cannot access the directory."
+    chmod a+x / 
+    chmod 777 "$PROJECT_DIR"
+fi
+
+echo "Setup complete! The repository is cloned at $PROJECT_DIR with maximum permissions."
